@@ -11,6 +11,48 @@ module.exports = (function() {
     }
   };
 
+  var refreshAccessToken = function(refreshToken) {
+    return new Promise(function(resolve, reject) {
+      var url = sails.config.box_config.boxAuthBaseUri + '/' + sails.config.box_config.tokenUri;
+      var formParams = {
+        form: {
+          grant_type: 'refresh_token',
+          refresh_token: refreshToken,
+          client_id: sails.config.box_config.clientId,
+          client_secret: sails.config.box_config.clientSecret
+        }
+      };
+
+      // Post the request to box to refresh the access token
+      request.post(url, formParams, function(err, response, body) {
+        if (err) { return reject(err); }
+        if (response.statusCode !== 200) {
+          var err = new Error("Non-200 response from Box: " + response.statusCode);
+          return reject(err);
+        }
+        resolve(JSON.parse(body));
+      });
+    });
+  };
+
+  var getAccessToken = function() {
+    return OauthAccessToken.retrieve().
+      then(function(oat) {
+        return new Promise(function(resolve, reject) {
+          if (! oat) { return reject(new Error("No access token; have the user request one")); }
+          if (oat.isExpired()) {
+            refreshAccessToken(oat.refresh_token).
+              then(OauthAccessToken.updateOrCreate).
+              then(function(updatedOat) {
+                resolve(updatedOat.access_token);
+              }).
+              catch(reject);
+          } else {
+            resolve(oat.access_token);
+          }
+        });
+      });
+  }
   var mod = {
 
     /**
@@ -25,7 +67,7 @@ module.exports = (function() {
      */
     authorizeRedirectUrl: function() {
 
-      var redirectUrl = sails.config.box_config.boxBaseUri + '/' + sails.config.box_config.authorizeUri + '?';
+      var redirectUrl = sails.config.box_config.boxAuthBaseUri + '/' + sails.config.box_config.authorizeUri + '?';
       redirectUrl += "response_type=code&";
       redirectUrl += "client_id=" + encodeURIComponent(sails.config.box_config.clientId) + "&";
       redirectUrl += "redirect_uri=" + encodeURIComponent(ourRedirectUrl()) + "&";
@@ -48,7 +90,7 @@ module.exports = (function() {
      */
     requestAccessToken: function(code) {
       return new Promise(function(resolve, reject) {
-        var url = sails.config.box_config.boxBaseUri + '/' + sails.config.box_config.tokenUri;
+        var url = sails.config.box_config.boxAuthBaseUri + '/' + sails.config.box_config.tokenUri;
         var formParams = {
           form: {
             grant_type: 'authorization_code',
@@ -75,28 +117,35 @@ module.exports = (function() {
      * Given the refresh token returned from the last request for an
      * API access token, request a new access token.
      */
-    refreshAccessToken: function(refreshToken) {
-      return new Promise(function(resolve, reject) {
-        var url = sails.config.box_config.boxBaseUri + '/' + sails.config.box_config.tokenUri;
-        var formParams = {
-          form: {
-            grant_type: 'refresh_token',
-            refresh_token: refreshToken,
-            client_id: sails.config.box_config.clientId,
-            client_secret: sails.config.box_config.clientSecret
-          }
-        };
+    refreshAccessToken: refreshAccessToken,
 
-        // Post the request to box to refresh the access token
-        request.post(url, formParams, function(err, response, body) {
-          if (err) { return reject(err); }
-          if (response.statusCode !== 200) {
-            var err = new Error("Non-200 response from Box: " + response.statusCode);
-            return reject(err);
-          }
-          resolve(JSON.parse(body));
+    /**
+     * Retrieve an access token we can use for a BOX api call.
+     * Error if there is no current access token. If the current access token
+     * has expired, refresh the access token, and return it.
+     */
+    getAccessToken: getAccessToken,
+
+    getFolder: function(folderId) {
+      return getAccessToken().
+        then(function(access_token) {
+          var options = {
+            url: sails.config.box_config.boxApiUri + '/folders/' + folderId,
+            headers: {
+              "Authorization": "Bearer " + access_token
+            }
+          };
+
+          return new Promise(function(resolve, reject) {
+            request(options, function(err, response, body) {
+              if (err) { return reject(err); }
+              if (response.statusCode !== 200) {
+                return reject(new Error("Error getting folder: " + response.statusCode));
+              }
+              resolve(JSON.parse(body));
+            });
+          });
         });
-      });
     }
 
   };
