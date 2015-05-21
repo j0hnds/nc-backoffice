@@ -41,6 +41,7 @@ module.exports = (function() {
         return new Promise(function(resolve, reject) {
           if (! oat) { return reject(new Error("No access token; have the user request one")); }
           if (oat.isExpired()) {
+            sails.log.info("Access token has expired...refreshing token");
             refreshAccessToken(oat.refresh_token).
               then(OauthAccessToken.updateOrCreate).
               then(function(updatedOat) {
@@ -48,6 +49,7 @@ module.exports = (function() {
               }).
               catch(reject);
           } else {
+            sails.log.info("Access token has not expired");
             resolve(oat.access_token);
           }
         });
@@ -129,6 +131,7 @@ module.exports = (function() {
     getFolder: function(folderId) {
       return getAccessToken().
         then(function(access_token) {
+          sails.log.info("The access token: %s", access_token);
           var options = {
             url: sails.config.box_config.boxApiUri + '/folders/' + folderId,
             headers: {

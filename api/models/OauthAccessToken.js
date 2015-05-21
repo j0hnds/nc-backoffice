@@ -46,8 +46,7 @@ module.exports = {
     },
 
     isExpired: function() {
-      return (new Date) < this.expires_on;
-      // return (Date.compare(this.expires_on, new Date) === -1) ? true : false
+      return (new Date) > this.expires_on;
     }
 
   },
