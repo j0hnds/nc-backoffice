@@ -1,11 +1,33 @@
 module.exports = (function() {
 
+  var exec = require('child_process').exec;
   var request = require('request');
   var Promise = require('promise');
+  var fs = require('fs');
 
   String.prototype.endsWith = function (s) {
     return this.length >= s.length && this.substr(this.length - s.length) == s;
   }
+
+  /**
+   * Invoke a shell command. stdout is returned in the
+   * callback, so you can capture the output.
+   */
+  var executeCmd = function(command) {
+    return new Promise(function (resolve, reject) {
+      exec(command, function(err, stdout, stderr) {
+        if (err) { return reject(err); }
+        resolve({stdout: stdout, stderr: stderr});
+      });
+    });
+  };
+
+  var downloadFile = function(downloadPath, bookFileId, access_token) {
+    var url = sails.config.box_config.boxApiUri + '/files/' + bookFileId + '/content';
+    var authHeader = "Authorization: Bearer " + access_token;
+    var curlCmd = 'curl -s -L -H "' + authHeader + '" ' + url + ' > ' + '"' + downloadPath + '"';
+    return executeCmd(curlCmd);
+  };
 
   var inventoryBoxFolder = function(boxFolderId) {
     return new Promise(function(resolve, reject) {
@@ -271,6 +293,15 @@ module.exports = (function() {
               resolve();
             });
           });
+        });
+    },
+
+    downloadFile: downloadFile,
+
+    downloadBookFile: function(bookFile) {
+      return getAccessToken().
+        then(function(access_token) {
+          return downloadFile("/tmp/" + bookFile.name, bookFile.bookFileId, access_token);
         });
     }
 
