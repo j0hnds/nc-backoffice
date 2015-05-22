@@ -3,6 +3,93 @@ module.exports = (function() {
   var request = require('request');
   var Promise = require('promise');
 
+  String.prototype.endsWith = function (s) {
+    return this.length >= s.length && this.substr(this.length - s.length) == s;
+  }
+
+  var inventoryBoxFolder = function(boxFolderId) {
+    return new Promise(function(resolve, reject) {
+      var limit = 100;
+      var offset = 0;
+      var totalCount = 0;
+      async.doWhilst(function processFolder(cb) {
+        getFolderItems(boxFolderId, limit, offset).
+          then(function(folderItems) {
+            totalCount = folderItems.total_count;
+            offset += limit; // Get ready for the next iteration
+            // Process the folder items
+            var justBookFiles = _.filter(folderItems.entries, function predicate(item) {
+              return item.type === 'file' && item.name.endsWith('.pdf');
+            });
+            saveBookFiles(boxFolderId, justBookFiles).
+              then(function() { cb(); }).
+              catch(cb);
+          }).
+          catch(cb);
+      }, function moreFolders() {
+        return offset < totalCount;
+      }, function doneProcessing(err) {
+        if (err) { return reject(err); }
+        resolve();
+      });
+    });
+  };
+
+  var saveBookFiles = function(boxFolderId, bookFiles) {
+    return new Promise(function(resolve, reject) {
+      async.eachLimit(bookFiles, 10, function processBook(book, cb) {
+        // Check to see if the book has already been inventoried...
+        BookFile.find({bookFileId: book.id, sha1: book.sha1}).
+          then(function(books) {
+            if (books.length > 0) {
+              sails.log.silly("Book already inventoried: id(%s), sha1(%s)", book.id, book.sha1);
+              return cb();
+            }
+            // Book needs to be inventoried, save it up
+            var bookObj = {
+              bookFileId: book.id,
+              sha1: book.sha1,
+              name: book.name,
+              folderId: boxFolderId
+            };
+            BookFile.create(bookObj).
+              then(function(newBook) { cb(); }).
+              catch(cb);
+          }).
+          catch(cb);
+      }, function doneProcessing(err) {
+        if (err) { return reject(err); }
+        resolve();
+      });
+    });
+  };
+
+  var getFolderItems = function(folderId, limit, offset) {
+    return getAccessToken().
+      then(function(access_token) {
+        var options = {
+          url: sails.config.box_config.boxApiUri + '/folders/' + folderId + '/items',
+          headers: {
+            "Authorization": "Bearer " + access_token
+          },
+          qs: {
+            limit: limit,
+            offset: offset
+          }
+        };
+
+        return new Promise(function(resolve, reject) {
+          request(options, function(err, response, body) {
+            if (err) { return reject(err); }
+            if (response.statusCode !== 200) {
+              return reject(new Error("Error getting folder: " + response.statusCode));
+            }
+            resolve(JSON.parse(body));
+          });
+        });
+      });
+  };
+
   var ourRedirectUrl = function() {
     if (process.env.NODE_ENV === 'development') {
       return sails.config.box_config.devRedirectUri;
@@ -41,7 +128,7 @@ module.exports = (function() {
         return new Promise(function(resolve, reject) {
           if (! oat) { return reject(new Error("No access token; have the user request one")); }
           if (oat.isExpired()) {
-            sails.log.info("Access token has expired...refreshing token");
+            sails.log.silly("Access token has expired...refreshing token");
             refreshAccessToken(oat.refresh_token).
               then(OauthAccessToken.updateOrCreate).
               then(function(updatedOat) {
@@ -49,7 +136,6 @@ module.exports = (function() {
               }).
               catch(reject);
           } else {
-            sails.log.info("Access token has not expired");
             resolve(oat.access_token);
           }
         });
@@ -159,27 +245,30 @@ module.exports = (function() {
      * number of items to return at a time and offset is the offset in to the
      * total list (0-based).
      */
-    getFolderItems: function(folderId, limit, offset) {
-      return getAccessToken().
-        then(function(access_token) {
-          var options = {
-            url: sails.config.box_config.boxApiUri + '/folders/' + folderId + '/items',
-            headers: {
-              "Authorization": "Bearer " + access_token
-            },
-            qs: {
-              limit: limit,
-              offset: offset
-            }
-          };
+    getFolderItems: getFolderItems,
 
+    /**
+     * Given a list of items from Box, check to see if each item has already
+     * been inventoried, and if not, create a new record.
+     * This method assumes that the bookFiles parameter has already been 
+     * filtered to contain only books (pdfs) and no folders.
+     */
+    saveBookFiles: saveBookFiles,
+
+    inventoryBoxFolder: inventoryBoxFolder,
+
+    inventoryBoxFolders: function() {
+      return Folder.find().
+        then(function(folders) {
           return new Promise(function(resolve, reject) {
-            request(options, function(err, response, body) {
+            async.eachLimit(folders, 1, function processFolder(folder, cb) {
+              sails.log.info("Inventorying folder: %s", folder.name);
+              inventoryBoxFolder(folder.folderId).
+                then(function() { cb(); }).
+                catch(cb);
+            }, function doneProcessing(err) {
               if (err) { return reject(err); }
-              if (response.statusCode !== 200) {
-                return reject(new Error("Error getting folder: " + response.statusCode));
-              }
-              resolve(JSON.parse(body));
+              resolve();
             });
           });
         });

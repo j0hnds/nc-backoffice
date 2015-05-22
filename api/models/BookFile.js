@@ -59,7 +59,7 @@ module.exports = {
     processed: {
       type: "boolean",
       required: true,
-      defaultTo: false
+      defaultsTo: false
     }
   }
 };
