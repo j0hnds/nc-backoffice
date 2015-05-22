@@ -14,11 +14,18 @@ module.exports = {
       required: true
     },
 
+    /**
+     * This is the Box id of the parent folder of this
+     * folder.
+     */
     parentFolderId: {
       type: 'string',
       required: false
     },
 
+    /**
+     * This is the name of the folder
+     */
     name: {
       type: 'string',
       required: true

@@ -54,7 +54,8 @@ module.exports = (function() {
           }
         });
       });
-  }
+  };
+
   var mod = {
 
     /**
@@ -128,14 +129,47 @@ module.exports = (function() {
      */
     getAccessToken: getAccessToken,
 
+    /**
+     * Retrieve the details of the specified folder.
+     */
     getFolder: function(folderId) {
       return getAccessToken().
         then(function(access_token) {
-          sails.log.info("The access token: %s", access_token);
           var options = {
             url: sails.config.box_config.boxApiUri + '/folders/' + folderId,
             headers: {
               "Authorization": "Bearer " + access_token
+            }
+          };
+
+          return new Promise(function(resolve, reject) {
+            request(options, function(err, response, body) {
+              if (err) { return reject(err); }
+              if (response.statusCode !== 200) {
+                return reject(new Error("Error getting folder: " + response.statusCode));
+              }
+              resolve(JSON.parse(body));
+            });
+          });
+        });
+    },
+
+    /**
+     * Retrieves the list of items in the specified folder. Limit is the maximum
+     * number of items to return at a time and offset is the offset in to the
+     * total list (0-based).
+     */
+    getFolderItems: function(folderId, limit, offset) {
+      return getAccessToken().
+        then(function(access_token) {
+          var options = {
+            url: sails.config.box_config.boxApiUri + '/folders/' + folderId + '/items',
+            headers: {
+              "Authorization": "Bearer " + access_token
+            },
+            qs: {
+              limit: limit,
+              offset: offset
             }
           };
 
